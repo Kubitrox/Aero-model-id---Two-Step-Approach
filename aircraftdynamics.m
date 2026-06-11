@@ -26,7 +26,7 @@ function xdot = aircraft_dynamics(x, u_m)
     % 3. Initialize state derivative vector
     xdot = zeros(18, 1);
     
-    % Kinematic translational equations (NED positions) [cite: 72, 73]
+    % Kinematic translational equations (NED positions) 
     xdot(1) = (u*cos(theta) + (v*sin(phi) + w*cos(phi))*sin(theta))*cos(psi) - (v*cos(phi) - w*sin(phi))*sin(psi) + Wxe;
     xdot(2) = (u*cos(theta) + (v*sin(phi) + w*cos(phi))*sin(theta))*sin(psi) + (v*cos(phi) - w*sin(phi))*cos(psi) + Wye;
     xdot(3) = -u*sin(theta) + (v*sin(phi) + w*cos(phi))*cos(theta) + Wze;
@@ -94,3 +94,5 @@ function z_pred = measurement_model(x)
     z_pred(11) = atan2(w, u);                    % Angle of Attack (alpha)
     z_pred(12) = atan2(v, sqrt(u^2 + w^2));      % Side slip angle (beta)
 end
+
+function Ew, std_w = state_uncertainties_model(t)
