@@ -95,4 +95,60 @@ function z_pred = measurement_model(x)
     z_pred(12) = atan2(v, sqrt(u^2 + w^2));      % Side slip angle (beta)
 end
 
-function Ew, std_w = state_uncertainties_model(t)
+function delta_xdot = aircraft_dynamics_noise(x, imu_noise)
+    % x = [x,y,z,u,v,w,phi,theta,psi,Wxe,Wye,Wze,
+    % lambdax, lambday, lambdaz, lambdap, lambdaq, lambdar].T
+    % imu_noise = [wx, wy, wz, wp, wq, wr].T
+
+    % 1. Unpack states
+    x_pos = x(1); y_pos = x(2); z_pos = x(3);
+    u = x(4); v = x(5); w = x(6);
+    phi = x(7); theta = x(8); psi = x(9);
+    lambda_Ax = x(10); lambda_Ay = x(11); lambda_Az = x(12);
+    lambda_p  = x(13); lambda_q  = x(14); lambda_r  = x(15);
+    Wxe = x(16); Wye = x(17); Wze = x(18);
+
+    % 2. Unpack uncertainties
+    wx = imu_noise(1); wy=imu_noise(2); wz=imu_noise(3);
+    wp = imu_noise(4); wq=imu_noise(5); wr=imu_noise(6);
+
+    delta_xdot = zeros(18,1);
+
+    % Velocity derivatives
+    delta_xdot(4) = -wx - v*wr + w*wq;
+    delta_xdot(5) = -wy - w*wp + u*wr;
+    delta_xdot(6) = -wz - u*wq + v*wp;
+
+    % Angle derivatives
+    delta_xdot(7) = -wp - wq*sin(phi)*tan(theta) - wr*cos(phi)*tan(theta);
+    delta_xdot(8) = -wq*cos(phi) + wr*sin(phi);
+    delta_xdot(9) = -wq*sin(phi)/cos(theta) - wr*cos(phi)/cos(theta);
+end
+
+function imu_noise = generate_imu_noise(samples)
+    % GENERATE_IMU_NOISE Generates a [samples x 6] matrix of white Gaussian 
+    % noise for IMU accelerometers (m/s^2) and gyroscopes (rad/s).
+    
+    % IMU noise standard deviations (matching bias levels)
+    sigma_wx = 0.02; % m/s^2
+    sigma_wy = 0.02; % m/s^2
+    sigma_wz = 0.03; % m/s^2
+    
+    % Convert gyro noise standard deviations from deg/s to rad/s
+    deg2rad  = pi / 180;
+    sigma_wp = 0.005 * deg2rad; % rad/s
+    sigma_wq = 0.005 * deg2rad; % rad/s
+    sigma_wr = 0.002 * deg2rad; % rad/s
+    
+    % Generate independent Gaussian noise channels
+    wx = sigma_wx * randn(samples, 1);
+    wy = sigma_wy * randn(samples, 1);
+    wz = sigma_wz * randn(samples, 1);
+    wp = sigma_wp * randn(samples, 1);
+    wq = sigma_wq * randn(samples, 1);
+    wr = sigma_wr * randn(samples, 1);
+    
+    % Package into a clean matrix column-wise (with terminating semicolon)
+    imu_noise = [wx, wy, wz, wp, wq, wr];
+end
+

@@ -60,14 +60,31 @@ n           = length(std_w);    % number of states
 w_k         = diag(std_w)*randn(n, N)  + diag(E_w)*ones(n, N);   % system noise
 
 % Measurement noise statistics:
-E_v         = 0;                        % bias of measurement noise
-std_v       = 1;                        % standard deviation of measurement noise
+% GPS noise
+% Position standard deviation
+sigmaPos = 1; % m
+% Velocity standard deviation
+sigmaVel = 0.01; % m/s
+% Attitude standard deviation
+sigmaAtt = 0.04; % deg
+% Other measurments noise
+sigmaVTAS = 0.2; % m/s
+sigmaAoA = 0.1; % deg
+sigmaSideSlip = 0.25; %deg 
+E_v         = zeros(12,1);                        % bias of measurement noise
+std_v       = [sigmaPos, sigmaPos, sigmaPos, ...
+    sigmaVel, sigmaVel, sigmaVel, ...
+    sigmaAtt, sigma Att, sigma Att, ...
+    sigmaVTAS, sigmaAoA, sigmaSideSlip];                        % standard deviation of measurement noise
 R           = diag(std_v.^2);           % variance of measurement noise
 nm          = length(std_v);            % number of measurements      
 v_k         = diag(std_v) * randn(nm, N)  + diag(E_v) * ones(nm, N);    % measurement noise
 
 B           = eye(m);   % input matrix
-G           = eye(n);   % noise input matrix
+G           = [0,0,0,0,0,0;
+               0,0,0,0,0,0;
+               0,0,0,0,0,0;
+               1,0,0,0,];   % noise input matrix
 
 %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
