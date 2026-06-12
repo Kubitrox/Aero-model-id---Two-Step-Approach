@@ -1,6 +1,7 @@
 classdef aircraft_dynamics
 
     properties (Constant)
+
         % ===== AIRCRAFT DATA =====
 
         Ixx = 15351; % kgm2
@@ -11,9 +12,98 @@ classdef aircraft_dynamics
         b = 13.3250; % m, wingspan
         S = 24.9900; % m2, wing area
         c = 1.9910; % m, MAC
+
+        % ===== TRUE IMU SENSOR BIASES AND DEVIATIONS =====
+        lambda_x_true = 0.02;                      % m/s^2
+        lambda_y_true = 0.02;                      % m/s^2
+        lambda_z_true = 0.03;                      % m/s^2
+        lambda_p_true = 0.005 * (pi / 180);        % rad/s
+        lambda_q_true = 0.005 * (pi / 180);        % rad/s
+        lambda_r_true = 0.002 * (pi / 180);        % rad/s
+
+        % ===== OTHER DEVIATIONS =====
+        % Position standard deviation
+        sigmaPos = 1; % m
+        % Velocity standard deviation
+        sigmaVel = 0.01; % m/s
+        % Attitude standard deviation
+        sigmaAtt = 0.04; % deg
+        sigmaVTAS = 0.2; % m/s
+        sigmaAoA = 0.1; % deg
+        sigmaSideSlip = 0.25; %deg 
+
     end
 
     methods (Static)
+
+        function [X_true, U_meas, Z_meas] = preprocess_flight_data(data, W_true)
+            % PREPROCESS_FLIGHT_DATA Prepares all vectors for the EKF loop
+            % INPUTS:
+            %   data   : The structure loaded from the .mat file (e.g. load('da3211_1.mat'))
+            %   W_true : 3x1 vector of true wind components [Wxe; Wye; Wze]
+            % OUTPUTS:
+            %   X_true : (N x 18) Matrix of clean, true states over time
+            %   U_meas : (N x 6)  Matrix of noisy IMU inputs fed to the EKF
+            %   Z_meas : (N x 12) Matrix of noisy GPS/Airdata measurements
+            
+            N = length(data.t);
+            dt = data.t(2) - data.t(1);
+            
+            % --- 1. Generate True Trajectory (Part 1, Q1) ---
+            % Calculate navigation-frame velocity derivatives using true data
+            xdot = (data.u_n.*cos(data.theta) + (data.v_n.*sin(data.phi) + data.w_n.*cos(data.phi)).*sin(data.theta)).*cos(data.psi) - (data.v_n.*cos(data.phi) - data.w_n.*sin(data.phi)).*sin(data.psi) + W_true(1);
+            ydot = (data.u_n.*cos(data.theta) + (data.v_n.*sin(data.phi) + data.w_n.*cos(data.phi)).*sin(data.theta)).*sin(data.psi) + (data.v_n.*cos(data.phi) - data.w_n.*sin(data.phi)).*cos(data.psi) + W_true(2);
+            zdot = -data.u_n.*sin(data.theta) + (data.v_n.*sin(data.phi) + data.w_n.*cos(data.phi)).*cos(data.theta) + W_true(3);
+            
+            % Integrate to find true positions
+            x_pos = cumtrapz(data.t, xdot);
+            y_pos = cumtrapz(data.t, ydot);
+            z_pos = cumtrapz(data.t, zdot);
+            
+            % Assemble the True State Matrix (N x 18)
+            X_true = [x_pos, y_pos, z_pos, ...                     % 1:3 Positions
+                      data.u_n, data.v_n, data.w_n, ...            % 4:6 Body Velocities
+                      data.phi, data.theta, data.psi, ...          % 7:9 Attitudes
+                      zeros(N, 3), ...                             % 10:12 True Accel Biases (0)
+                      zeros(N, 3), ...                             % 13:15 True Gyro Biases (0)
+                      repmat(W_true', N, 1)];                       % 16:18 True Wind States
+                  
+            % --- 2. Generate Noisy IMU Inputs (Part 1, Q2) ---
+            
+            % Generate random IMU noise using your existing class function
+            imu_noise = aircraft_dynamics.generate_imu_noise(N);
+            
+            % Corrupt clean IMU data with biases and noise
+            Ax_m = data.Ax + aircraft_dynamics.lambda_x_true + imu_noise(:, 1);
+            Ay_m = data.Ay + aircraft_dynamics.lambda_y_true + imu_noise(:, 2);
+            Az_m = data.Az + aircraft_dynamics.lambda_z_true + imu_noise(:, 3);
+            
+            p_m  = data.p  + aircraft_dynamics.lambda_p_true + imu_noise(:, 4);
+            q_m  = data.q  + aircraft_dynamics.lambda_q_true + imu_noise(:, 5);
+            r_m  = data.r  + aircraft_dynamics.lambda_r_true + imu_noise(:, 6);
+            
+            U_meas = [Ax_m, Ay_m, Az_m, p_m, q_m, r_m];
+            
+            % --- 3. Generate Noisy Sensor Measurements (Part 1, Q2) ---
+            % Standard deviations from assignment specifications
+            v_pos = aircraft_dynamics.sigmaPos * randn(N, 3);                 % GPS Position Noise
+            v_vel = aircraft_dynamics.sigmaVel * randn(N, 3);                 % GPS Velocity Noise (0.01 m/s)
+            v_att = (aircraft_dynamics.sigmaAtt * (pi/180)) * randn(N, 3);    % GPS Attitude Noise (0.04 deg -> rad)
+            v_v   = aircraft_dynamics.sigmaVTAS * randn(N, 1);                  % Airdata V Noise (0.2 m/s)
+            v_alp = (aircraft_dynamics.AoA * (pi/180)) * randn(N, 1);     % Airdata Alpha Noise (0.1 deg -> rad)
+            v_bet = (aircraft_dynamics.SideSlip * (pi/180)) * randn(N, 1);    % Airdata Beta Noise (0.25 deg -> rad)
+            
+            % Ground speed components (Clean tracking derivatives)
+            u_GS_m = xdot + v_vel(:, 1); [cite: 112]
+            v_GS_m = ydot + v_vel(:, 2); [cite: 114]
+            w_GS_m = zdot + v_vel(:, 3); [cite: 116]
+            
+            % Assemble Noisy Measurement Matrix (N x 12) [cite: 90]
+            Z_meas = [x_pos + v_pos(:, 1), y_pos + v_pos(:, 2), z_pos + v_pos(:, 3), ... % 1:3 GPS Pos
+                      u_GS_m, v_GS_m, w_GS_m, ...                                        % 4:6 GPS Vel
+                      data.phi + v_att(:, 1), data.theta + v_att(:, 2), data.psi + v_att(:, 3), ... % 7:9 GPS Att
+                      data.vtas + v_v, data.alpha + v_alp, data.beta + v_bet];           % 10:12 Airdata
+        end
 
         function xdot = state_propagation(x, u_m)
             % x = [x,y,z,u,v,w,phi,theta,psi,
